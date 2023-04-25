@@ -3,6 +3,7 @@ import sys
 from enum import Enum
 import dds
 import math
+import os
 
 class GfxImageFormat(Enum):
     INVALID = 0
@@ -89,7 +90,7 @@ def export_dds(path, format, width, height, data):
         sCaps_dwCaps1=dds.DDSCAPS_TEXTURE
     )
 
-    with open("image.dds", "wb") as f:
+    with open(path, "wb") as f:
         f.write(hdr.pack())
         f.write(data)
 
@@ -126,9 +127,13 @@ with open(input_filename, "rb") as file:
 
     texture_size = ((header.dimensions[0] + 3) // 4) * ((header.dimensions[1] + 3) // 4) * bpp
     texture_data_offset = header.file_size_for_picmip[0]
-    texture_data_offset -= texture_size
-    for face in range(numfaces):
-        print(f'face: {face}, offset: {texture_data_offset}, size: {texture_size}')
-        image_data = data[texture_data_offset:texture_size + texture_data_offset]
-        print(f'image_data: {len(image_data)}')
-        export_dds("test.dds", GfxImageFormat(header.format), header.dimensions[0], header.dimensions[1], image_data)
+    texture_data_offset -= texture_size * numfaces
+    
+    print(f'offset: {texture_data_offset}, size: {texture_size}')
+    image_data = data[texture_data_offset:texture_size + texture_data_offset]
+    print(f'image_data: {len(image_data)}')
+    path = os.path.realpath(input_filename)
+    dirpath = os.path.dirname(path)
+    filename = os.path.basename(path)
+    basename = os.path.splitext(filename)[0]
+    export_dds(f'{dirpath}/{basename}.dds', GfxImageFormat(header.format), header.dimensions[0], header.dimensions[1], image_data)
