@@ -140,6 +140,8 @@ with open(args.input_file, "rb") as file:
 
     mipmaps = []
     mipcount = int(math.log2(max(header.dimensions[0], header.dimensions[1], 1))) + 1
+    if header.flags & IMAGE_FLAGS_NOMIPMAP:
+        mipcount = 1
     total = 0
 
     offsz = 28
