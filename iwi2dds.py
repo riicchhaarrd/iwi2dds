@@ -4,6 +4,12 @@ from enum import Enum
 import dds
 import math
 import os
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--mipmaps', action='store_true')
+parser.add_argument('input_file', type=str, help='input file')
+args = parser.parse_args()
 
 class GfxImageFormat(Enum):
     INVALID = 0
@@ -26,12 +32,6 @@ IMAGE_FLAGS_NOPICMIP = 1
 IMAGE_FLAGS_NOMIPMAP = 2 
 IMAGE_FLAGS_CUBEMAP = 4
 IMAGE_FLAGS_VOLMAP = 8
-
-if len(sys.argv) != 2:
-    print(f'Usage: python {sys.argv[0]} <input_file>')
-    sys.exit(1)
-
-input_filename = sys.argv[1]
 
 gfx_image_header_format = "<3sbbb3h4i"
 
@@ -72,16 +72,12 @@ def export_dds(path, format, width, height, data):
     if len(data) == 0:
         raise Exception('No image data')
         
-    depth = 1
-    mipcount = math.log2(max(width, height, depth)) + 1
-
     hdr = dds.DDS_Header(
         dwFlags=dds.DDSD_CAPS | dds.DDSD_HEIGHT | dds.DDSD_WIDTH | dds.DDSD_PIXELFORMAT,
         #dwFlags=dds.DDSD_CAPS | dds.DDSD_HEIGHT | dds.DDSD_WIDTH | dds.DDSD_PIXELFORMAT | dds.DDSD_LINEARSIZE,
-        dwHeight=width,
-        dwWidth=height,
-        dwDepth=depth,
-        dwMipMapCount=int(mipcount),
+        dwHeight=height,
+        dwWidth=width,
+        dwDepth=1,
         sPixelFormat_dwSize=32,
         sPixelFormat_dwFlags=dds.DDPF_FOURCC,
         # is this portable?
@@ -94,7 +90,19 @@ def export_dds(path, format, width, height, data):
         f.write(hdr.pack())
         f.write(data)
 
-with open(input_filename, "rb") as file:
+def calculate_compressed_mipmap_size(width, height, bpp):
+    return ((width + 3) // 4) * ((height + 3) // 4) * bpp
+
+class Mipmap:
+    def __init__(self, level, w, h, offset, size, data = None):
+        self.level = level
+        self.width = w
+        self.height = h
+        self.offset = offset
+        self.size = size
+        self.data = data
+
+with open(args.input_file, "rb") as file:
     data = file.read()
     header = GfxImageHeader.unpack(data[:28])
     
@@ -117,6 +125,11 @@ with open(input_filename, "rb") as file:
     print("file_size_for_picmip:", header.file_size_for_picmip)
     #print(header.__dict__)
 
+    path = os.path.realpath(args.input_file)
+    dirpath = os.path.dirname(path)
+    filename = os.path.basename(path)
+    basename = os.path.splitext(filename)[0]
+
     numfaces = 1
     if header.flags & IMAGE_FLAGS_CUBEMAP:
         numfaces = 6
@@ -125,15 +138,26 @@ with open(input_filename, "rb") as file:
     if image_format != GfxImageFormat.DXT1:
         bpp = 16
 
-    texture_size = ((header.dimensions[0] + 3) // 4) * ((header.dimensions[1] + 3) // 4) * bpp
-    texture_data_offset = header.file_size_for_picmip[0]
-    texture_data_offset -= texture_size * numfaces
+    mipmaps = []
+    mipcount = int(math.log2(max(header.dimensions[0], header.dimensions[1], 1))) + 1
+    total = 0
+
+    offsz = 28
+
+    for miplevel in range(mipcount - 1, -1, -1):
+        w = max(header.dimensions[0] >> miplevel, 1)
+        h = max(header.dimensions[1] >> miplevel, 1)
+        sz = calculate_compressed_mipmap_size(w, h, bpp) * numfaces
+
+        mipmap = Mipmap(miplevel, w, h, offsz, sz, data[offsz:offsz+sz])
+        mipmaps.append(mipmap)
+
+        offsz += sz
     
-    print(f'offset: {texture_data_offset}, size: {texture_size}')
-    image_data = data[texture_data_offset:texture_size + texture_data_offset]
-    print(f'image_data: {len(image_data)}')
-    path = os.path.realpath(input_filename)
-    dirpath = os.path.dirname(path)
-    filename = os.path.basename(path)
-    basename = os.path.splitext(filename)[0]
-    export_dds(f'{dirpath}/{basename}.dds', GfxImageFormat(header.format), header.dimensions[0], header.dimensions[1], image_data)
+    if args.mipmaps:
+        for mipmap in mipmaps:
+            print(f'level: {mipmap.level}, width: {mipmap.width}, height: {mipmap.height}, size: {mipmap.size}')
+            export_dds(f'{dirpath}/{basename}_{mipmap.level}.dds', GfxImageFormat(header.format), mipmap.width, mipmap.height, mipmap.data)
+    else:
+        mipmap = mipmaps[-1]
+        export_dds(f'{dirpath}/{basename}.dds', GfxImageFormat(header.format), mipmap.width, mipmap.height, mipmap.data)
