@@ -10,7 +10,7 @@
 
 To run the program with the desired command-line arguments, use the following syntax:
 
-`python program.py [--mipmaps] input_file [file_path]`
+`python3 iwi2dds.py [--mipmaps] input_file [file_path]`
 
 ## Command-line Arguments
 
